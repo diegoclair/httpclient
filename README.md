@@ -17,9 +17,6 @@
     <a href="https://opensource.org/licenses/MIT">
      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" />
     </a>
-    <a href='https://goreportcard.com/badge/github.com/diegoclair/httpclient'>
-     <img src='https://goreportcard.com/badge/github.com/diegoclair/httpclient' alt='Go Report'/>
-    </a>
 </p>
 
 An adapter for a third-party API keeps only what is actually specific to that
