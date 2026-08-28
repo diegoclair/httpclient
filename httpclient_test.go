@@ -27,7 +27,7 @@ func TestNew_hasTimeoutAndDefaultHeaders(t *testing.T) {
 	c := New()
 	require.Positive(t, c.Timeout, "a client with no timeout can hang forever")
 
-	out, err := DoJSON[payload](context.Background(), c, Request{
+	out, _, err := DoJSON[payload](context.Background(), c, Request{
 		Method: http.MethodPost, URL: srv.URL, Body: payload{Name: "x"}, ServiceName: "svc",
 	})
 	require.NoError(t, err)

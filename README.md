@@ -103,6 +103,7 @@ func (c *Client) call(ctx context.Context, method string, in, out any) error {
                 ServiceName: resp.ServiceName,
                 StatusCode:  resp.StatusCode,
                 Body:        string(resp.Body),
+                Header:      resp.Header,
             },
             Description: body.Description,
         }
@@ -127,14 +128,23 @@ When the provider needs no envelope parsing, `DoJSON` is `Do` + status check +
 `Decode` in one call:
 
 ```go
-order, err := httpclient.DoJSON[Order](ctx, c.http, httpclient.Request{
+order, resp, err := httpclient.DoJSON[Order](ctx, c.http, httpclient.Request{
     Method: http.MethodGet,
     URL:    "https://api.mercadolibre.com/orders/" + id,
     Query:  url.Values{"attributes": {"id,status"}},
 })
 ```
 
-Use `httpclient.Empty` as the type parameter for a call that answers no body.
+The response comes back on the status-error path too, so a caller that only
+wants the decoded value discards it and the one that needs `Retry-After`, a
+`Location` or the exact 2xx reads it off `resp`:
+
+```go
+order, _, err := httpclient.DoJSON[Order](ctx, c.http, req)
+```
+
+Use `httpclient.Empty` as the type parameter for a call that answers no body;
+a POST whose only useful answer is a header is the case `resp` is there for.
 
 ## Options
 

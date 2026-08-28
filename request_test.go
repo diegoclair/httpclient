@@ -102,15 +102,17 @@ func TestDoJSON_failsOnNonOKStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := DoJSON[payload](context.Background(), New(), Request{Method: http.MethodGet, URL: srv.URL, Retry: noWait()})
+	_, resp, err := DoJSON[payload](context.Background(), New(), Request{Method: http.MethodGet, URL: srv.URL, Retry: noWait()})
 	require.Error(t, err)
 	assert.True(t, IsConflict(err))
+	require.NotNil(t, resp, "the caller still needs the response to read headers off a failure")
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
 func TestDoJSON_propagatesTransportFailures(t *testing.T) {
 	rt := roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("dial refused") })
 
-	_, err := DoJSON[payload](context.Background(), New(WithTransport(rt)), Request{
+	_, _, err := DoJSON[payload](context.Background(), New(WithTransport(rt)), Request{
 		Method: http.MethodGet, URL: "http://example.invalid", ServiceName: "svc", Retry: NoRetry(),
 	})
 	require.ErrorContains(t, err, "calling svc")
@@ -227,4 +229,32 @@ func TestResponse_OKBoundaries(t *testing.T) {
 	for code, want := range map[int]bool{199: false, 200: true, 299: true, 300: false} {
 		assert.Equal(t, want, (&Response{StatusCode: code}).OK(), "status %d", code)
 	}
+}
+
+func TestDoJSON_returnsResponseOnSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/orders/7")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"name":"ok"}`))
+	}))
+	defer srv.Close()
+
+	out, resp, err := DoJSON[payload](context.Background(), New(), Request{Method: http.MethodPost, URL: srv.URL})
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", out.Name)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode, "a 201 is not a 200 to every caller")
+	assert.Equal(t, "/orders/7", resp.Header.Get("Location"))
+}
+
+func TestResponseErr_carriesTheHeader(t *testing.T) {
+	resp := &Response{
+		StatusCode:  http.StatusTooManyRequests,
+		Header:      http.Header{"Retry-After": {"30"}},
+		ServiceName: "svc",
+	}
+
+	statusErr, ok := errors.AsType[*StatusError](resp.Err())
+	require.True(t, ok)
+	assert.Equal(t, "30", statusErr.Header.Get("Retry-After"))
 }

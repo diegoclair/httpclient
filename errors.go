@@ -6,6 +6,10 @@ import (
 	"net/http"
 )
 
+// Keeps a log line readable when an edge in front of the API answers a full
+// HTML page instead of the provider's error envelope.
+const errorBodyLimit = 512
+
 // ErrResponseTooLarge reports a body past the client's size bound; the body is
 // discarded rather than truncated, since half a JSON document decodes to noise.
 var ErrResponseTooLarge = errors.New("response too large")
@@ -15,14 +19,24 @@ var ErrResponseTooLarge = errors.New("response too large")
 type StatusError struct {
 	ServiceName string
 	StatusCode  int
-	Body        string
+
+	// Full body; Error truncates for display only.
+	Body   string
+	Header http.Header
 }
 
 func (e *StatusError) Error() string {
 	if e.Body != "" {
-		return fmt.Sprintf("%s returned status %d: %s", e.ServiceName, e.StatusCode, e.Body)
+		return fmt.Sprintf("%s returned status %d: %s", e.ServiceName, e.StatusCode, truncate(e.Body, errorBodyLimit))
 	}
 	return fmt.Sprintf("%s returned status %d", e.ServiceName, e.StatusCode)
+}
+
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "..."
 }
 
 // Marks a deterministic failure, which the retry policy must not spend an

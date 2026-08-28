@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,14 @@ func TestStatusError_Error(t *testing.T) {
 		(&StatusError{ServiceName: "svc", StatusCode: 404, Body: "nope"}).Error())
 	assert.Equal(t, "svc returned status 404",
 		(&StatusError{ServiceName: "svc", StatusCode: 404}).Error())
+}
+
+func TestStatusError_ErrorTruncatesTheBody(t *testing.T) {
+	html := strings.Repeat("x", errorBodyLimit*3)
+	err := &StatusError{ServiceName: "svc", StatusCode: 502, Body: html}
+
+	assert.Equal(t, "svc returned status 502: "+strings.Repeat("x", errorBodyLimit)+"...", err.Error())
+	assert.Len(t, err.Body, errorBodyLimit*3, "only the message is trimmed; parsing still needs the whole body")
 }
 
 func TestStatusHelpers(t *testing.T) {

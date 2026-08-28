@@ -56,7 +56,12 @@ func (r *Response) Err() error {
 	if r.OK() {
 		return nil
 	}
-	return &StatusError{ServiceName: r.ServiceName, StatusCode: r.StatusCode, Body: string(r.Body)}
+	return &StatusError{
+		ServiceName: r.ServiceName,
+		StatusCode:  r.StatusCode,
+		Body:        string(r.Body),
+		Header:      r.Header,
+	}
 }
 
 // Do executes the request under the retry policy. A non-2xx status is not an
@@ -195,15 +200,17 @@ func Decode[T any](resp *Response) (*T, error) {
 	return &out, nil
 }
 
-// DoJSON is Do + status check + Decode. Use Do plus Decode when the provider's
-// error envelope needs custom parsing.
-func DoJSON[T any](ctx context.Context, client *http.Client, r Request) (*T, error) {
+// DoJSON is Do + status check + Decode. The response also comes back on the
+// status-error path, where headers such as Retry-After live. Use Do plus Decode
+// when the provider's error envelope needs custom parsing.
+func DoJSON[T any](ctx context.Context, client *http.Client, r Request) (*T, *Response, error) {
 	resp, err := Do(ctx, client, r)
 	if err != nil {
-		return nil, err
+		return nil, resp, err
 	}
 	if err := resp.Err(); err != nil {
-		return nil, err
+		return nil, resp, err
 	}
-	return Decode[T](resp)
+	out, err := Decode[T](resp)
+	return out, resp, err
 }
