@@ -213,6 +213,7 @@ sends the same body bytes.
 | `MaxBackoff` | Ceiling for a single wait (default 30s) |
 | `RetryWrites` | Allow retrying non-idempotent methods |
 | `RetryAfter` | Reads the wait out of the provider's own envelope |
+| `Retryable` | Refuses a retry the status alone would allow, for a refusal the provider's body says will repeat; never adds one |
 
 The wait is **full jitter**: uniform over `[0, min(Backoff<<(attempt-1),
 MaxBackoff))`. Fleets that fail together retry together; drawing the whole

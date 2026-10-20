@@ -35,6 +35,10 @@ type RetryPolicy struct {
 	// Reads the wait out of the provider's own envelope, which wins over the
 	// Retry-After header. Returning 0 falls back to it.
 	RetryAfter func(*Response) time.Duration
+
+	// Asked only of a response whose status would be retried, so it can refuse
+	// a retry and never add one. Nil retries on the status alone.
+	Retryable func(*Response) bool
 }
 
 // NoRetry is a policy of a single attempt.
@@ -56,6 +60,7 @@ func (p *RetryPolicy) normalized() RetryPolicy {
 	}
 	out.RetryWrites = p.RetryWrites
 	out.RetryAfter = p.RetryAfter
+	out.Retryable = p.Retryable
 	return out
 }
 
@@ -68,7 +73,10 @@ func (p RetryPolicy) shouldRetry(ctx context.Context, method string, resp *Respo
 	if err != nil {
 		return transportRetriable(ctx, err)
 	}
-	return retriableStatus(resp.StatusCode)
+	if !retriableStatus(resp.StatusCode) {
+		return false
+	}
+	return p.Retryable == nil || p.Retryable(resp)
 }
 
 func (p RetryPolicy) delayFor(attempt int, resp *Response) time.Duration {

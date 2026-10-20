@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -298,6 +299,8 @@ func TestParseRetryAfter(t *testing.T) {
 func TestRetryPolicy_shouldRetry(t *testing.T) {
 	readOnly := RetryPolicy{MaxAttempts: 3}
 	writesToo := RetryPolicy{MaxAttempts: 3, RetryWrites: true}
+	refusesEvery := RetryPolicy{MaxAttempts: 3, Retryable: func(*Response) bool { return false }}
+	keepsEvery := RetryPolicy{MaxAttempts: 3, Retryable: func(*Response) bool { return true }}
 
 	dead, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -334,6 +337,11 @@ func TestRetryPolicy_shouldRetry(t *testing.T) {
 		{name: "caller gave up on a plain failure", ctx: dead, policy: readOnly, method: http.MethodGet, err: assert.AnError, want: false},
 		{name: "permanent failure", policy: readOnly, method: http.MethodGet, err: permanent(assert.AnError), want: false},
 		{name: "transport failure on write is refused", policy: readOnly, method: http.MethodPost, err: assert.AnError, want: false},
+		{name: "429 the hook refuses", policy: refusesEvery, method: http.MethodGet, resp: &Response{StatusCode: 429}, want: false},
+		{name: "429 the hook keeps", policy: keepsEvery, method: http.MethodGet, resp: &Response{StatusCode: 429}, want: true},
+		{name: "404 the hook keeps is still final", policy: keepsEvery, method: http.MethodGet, resp: &Response{StatusCode: 404}, want: false},
+		{name: "write the hook keeps is still refused", policy: keepsEvery, method: http.MethodPost, resp: &Response{StatusCode: 502}, want: false},
+		{name: "transport failure never asks the hook", policy: refusesEvery, method: http.MethodGet, err: assert.AnError, want: true},
 	}
 
 	for _, tt := range tests {
@@ -354,6 +362,7 @@ func TestRetryPolicy_normalized(t *testing.T) {
 	assert.Equal(t, defaultMaxBackoff, def.MaxBackoff)
 	assert.False(t, def.RetryWrites, "writes must not be retried unless asked for")
 	assert.Nil(t, def.RetryAfter)
+	assert.Nil(t, def.Retryable, "no hook keeps the status rule")
 
 	custom := (&RetryPolicy{MaxAttempts: 0, Backoff: -1, MaxBackoff: -1}).normalized()
 	assert.Equal(t, defaultMaxAttempts, custom.MaxAttempts, "invalid values fall back to the default")
@@ -363,6 +372,41 @@ func TestRetryPolicy_normalized(t *testing.T) {
 	hook := (&RetryPolicy{RetryAfter: func(*Response) time.Duration { return time.Second }}).normalized()
 	require.NotNil(t, hook.RetryAfter)
 	assert.Equal(t, time.Second, hook.RetryAfter(nil))
+
+	veto := (&RetryPolicy{Retryable: func(*Response) bool { return false }}).normalized()
+	require.NotNil(t, veto.Retryable, "the hook survives normalisation")
+}
+
+func TestRetry_aResponseTheHookRefusesIsTheLastAttempt(t *testing.T) {
+	rt, calls := stubTransport(
+		stub{status: http.StatusTooManyRequests, body: `{"message":"same request again"}`},
+		stub{status: http.StatusOK, body: `{}`},
+	)
+
+	resp, err := Do(context.Background(), New(WithTransport(rt)), Request{
+		Method: http.MethodGet, URL: "http://example.invalid",
+		Retry: &RetryPolicy{Backoff: 0, Retryable: func(r *Response) bool {
+			return !strings.Contains(string(r.Body), "same request again")
+		}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	assert.Equal(t, 1, *calls)
+}
+
+func TestRetry_aResponseTheHookKeepsIsTriedAgain(t *testing.T) {
+	rt, calls := stubTransport(
+		stub{status: http.StatusTooManyRequests, body: `{"message":"slow down"}`},
+		stub{status: http.StatusOK, body: `{}`},
+	)
+
+	resp, err := Do(context.Background(), New(WithTransport(rt)), Request{
+		Method: http.MethodGet, URL: "http://example.invalid",
+		Retry: &RetryPolicy{Backoff: 0, Retryable: func(*Response) bool { return true }},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 2, *calls)
 }
 
 func TestRetry_clientTimeoutIsRetried(t *testing.T) {
