@@ -125,7 +125,7 @@ func doOnce(ctx context.Context, client *http.Client, cfg settings, r Request, r
 
 	req, err := http.NewRequestWithContext(ctx, r.Method, reqURL, body)
 	if err != nil {
-		return nil, permanent(fmt.Errorf("httpclient: build request: %w", err))
+		return nil, permanent(fmt.Errorf("httpclient: build request: %w", keepOnlyTheHost(err)))
 	}
 
 	for k, v := range r.Headers {
@@ -147,7 +147,7 @@ func doOnce(ctx context.Context, client *http.Client, cfg settings, r Request, r
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("httpclient: calling %s: %w", service, err)
+		return nil, fmt.Errorf("httpclient: calling %s: %w", service, keepOnlyTheHost(err))
 	}
 	defer resp.Body.Close()
 
@@ -171,7 +171,7 @@ func buildURL(base string, query url.Values) (string, error) {
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return "", fmt.Errorf("httpclient: parse url: %w", err)
+		return "", fmt.Errorf("httpclient: parse url: %w", keepOnlyTheHost(err))
 	}
 	q, err := url.ParseQuery(u.RawQuery)
 	if err != nil {

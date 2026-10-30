@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // Keeps a log line readable when an edge in front of the API answers a full
@@ -37,6 +38,23 @@ func truncate(s string, limit int) string {
 		return s
 	}
 	return s[:limit] + "..."
+}
+
+// A *url.Error quotes the whole address, which holds credentials this library cannot tell from a resource: a token in
+// the query, a token in the path. The caller names its own endpoint. Called before wrapping: a wrap freezes the text.
+func keepOnlyTheHost(err error) error {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
+		urlErr.URL = toOrigin(urlErr.URL)
+	}
+	return err
+}
+
+func toOrigin(address string) string {
+	u, err := url.Parse(address)
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // Marks a deterministic failure, which the retry policy must not spend an

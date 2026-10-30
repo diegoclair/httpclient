@@ -299,7 +299,9 @@ names are rejected — both silently tolerated by v1, and both a real source of
 wrong values from providers that emit `id` and `ID` in the same object.
 
 **Errors are plain.** `fmt.Errorf("httpclient: …: %w")`, nothing else, so the
-library imposes no error taxonomy on whoever adopts it.
+library imposes no error taxonomy on whoever adopts it. A failed call's error
+quotes only the scheme and host of its address, since a query or a path can hold
+a credential: the caller that wants its endpoint in the log names it.
 
 ## License
 

@@ -119,6 +119,67 @@ func TestDoJSON_propagatesTransportFailures(t *testing.T) {
 	assert.Zero(t, StatusCode(err))
 }
 
+// An address holds credentials no code here can tell from a resource, and the error of a failed call reaches logs.
+func TestDo_aFailedCallQuotesNoMoreOfItsAddressThanTheHost(t *testing.T) {
+	const credential = "the-credential"
+	cause := errors.New("connection reset")
+	failing := roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, cause })
+	redirecting := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/moved" {
+			return nil, cause
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound, Header: http.Header{"Location": {"/moved?access_token=" + credential}},
+			Body: http.NoBody, Request: r,
+		}, nil
+	})
+
+	tests := map[string]struct {
+		transport http.RoundTripper
+		request   Request
+	}{
+		"in the address's query": {failing, Request{URL: "https://vendor.test/api?access_token=" + credential}},
+		"in the query of the request": {failing, Request{
+			URL: "https://vendor.test/api", Query: url.Values{"access_token": {credential}, "sign": {credential}},
+		}},
+		"in the path":           {failing, Request{URL: "https://vendor.test/bot" + credential + "/sendMessage"}},
+		"in a redirect's query": {redirecting, Request{URL: "https://vendor.test/api"}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var observed error
+			client := New(WithTransport(tt.transport), WithObserver(func(_ context.Context, e Event) { observed = e.Err }))
+			tt.request.Method, tt.request.Retry = http.MethodGet, NoRetry()
+
+			_, err := Do(context.Background(), client, tt.request)
+
+			require.ErrorIs(t, err, cause, "the failure itself stays readable")
+			assert.ErrorContains(t, err, "https://vendor.test")
+			assert.NotContains(t, err.Error(), credential)
+			assert.NotContains(t, observed.Error(), credential, "an observer logs the same error")
+			_, stillAURLError := errors.AsType[*url.Error](err)
+			assert.True(t, stillAURLError, "whoever reads its type or Timeout keeps reading it")
+		})
+	}
+}
+
+// The address that cannot be parsed is the one nothing can cut, so nothing of it stays.
+func TestDo_anAddressThatDoesNotParseQuotesNoneOfIt(t *testing.T) {
+	const credential = "the-credential"
+
+	for name, query := range map[string]url.Values{"with no query": nil, "with a query": {"a": {"b"}}} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Do(context.Background(), New(), Request{
+				Method: http.MethodGet, URL: "https://vendor.test/bot" + credential + "/\x7f", Query: query,
+			})
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), credential)
+		})
+	}
+}
+
 func TestDecode(t *testing.T) {
 	tests := []struct {
 		name    string
